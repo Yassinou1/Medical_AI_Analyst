@@ -3,6 +3,8 @@ import requests
 import pandas as pd
 from services.openfda_service import MedicalDataService
 import time
+from duckduckgo_search import DDGS
+from services.german_alerts_service import GermanPharmacovigilanceService
 
 st.set_page_config(page_title="Medical AI Analyst", layout="centered")
 
@@ -50,7 +52,7 @@ if st.button("Klinische Analyse starten", type="primary"):
 
     st.subheader("Nebenwirkungs-Trend (Letzte 4 Wochen)")
     with st.spinner("Lade Vergleichsdaten..."):
-        common_drugs = ["ibuprofen", "paracetamol", "amoxicillin", "omeprazole"]
+        common_drugs = ["ibuprofen", "acetaminophen", "amoxicillin", "omeprazole"]
         compare_list = [drug_name] + [d for d in common_drugs if d != drug_name]
         
         trend_data = {}
@@ -63,7 +65,6 @@ if st.button("Klinische Analyse starten", type="primary"):
                     recent_4_weeks = hist['Adverse_Events'].tail(4).sum()
                     trend_data[med] = recent_4_weeks
 
-                # Spam schutz für die API
                 time.sleep(1.0) 
                 
             except Exception as e:
