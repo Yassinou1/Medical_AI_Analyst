@@ -1,0 +1,16 @@
+fastapi
+uvicorn
+requests
+tensorflow
+pandas
+numpy
+scikit-learn
+joblib
+langchain
+langchain-community
+langchain-ollama
+langgraph
+chromadb
+sentence-transformers
+matplotlib
+xmltodict
