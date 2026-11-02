@@ -6,10 +6,11 @@ structured JSON (Pydantic models) for API consumption and runs
 fully asynchronously.
 """
 
+import json
 import logging
-from typing import TypedDict, Annotated, Sequence, List
+from typing import Any, TypedDict, Annotated, Sequence, List
 import operator
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_ollama import ChatOllama
@@ -30,10 +31,41 @@ class AgentState(TypedDict):
 
 class ClinicalAnalysis(BaseModel):
     """Structured output expected from the LLM."""
-    risk_factors: List[str] = Field(description="Spezifische Risikofaktoren für Patienten oder Medikamentenwechselwirkungen aus der Literatur. WICHTIG: Antworte auf Deutsch.")
-    contraindications: List[str] = Field(description="Bekannte oder neu entdeckte Kontraindikationen. WICHTIG: Antworte auf Deutsch.")
+    risk_factors: List[str] = Field(description="Spezifische Risikofaktoren für Patienten oder Medikamentenwechselwirkungen aus der Literatur. Jeder Eintrag ist ein kurzer, einfacher deutscher Satz mit Quelle in Klammern, kein JSON. WICHTIG: Antworte auf Deutsch.")
+    contraindications: List[str] = Field(description="Bekannte oder neu entdeckte Kontraindikationen. Jeder Eintrag ist ein kurzer, einfacher deutscher Satz, kein JSON. WICHTIG: Antworte auf Deutsch.")
     summary: str = Field(description="Kurze Zusammenfassung (2-3 Sätze) der aktuellen Literatur, die die Anomalie erklärt. WICHTIG: Antworte auf Deutsch.")
     confidence_score: float = Field(description="Konfidenz der Ergebnisse von 0.0 bis 1.0 basierend auf der Qualität der Evidenz.")
+
+    @field_validator("risk_factors", "contraindications", mode="before")
+    @classmethod
+    def flatten_json_items(cls, items: Any) -> List[str]:
+        """Convert list items the LLM returned as JSON objects into plain sentences."""
+        if not isinstance(items, list):
+            return items
+        return [_item_to_text(item) for item in items]
+
+
+def _item_to_text(item: Any) -> str:
+    """Render a single list item as readable text.
+
+    Local models sometimes emit JSON objects (or JSON-encoded strings) instead
+    of plain sentences. These are reduced to their description and source.
+    """
+    if isinstance(item, str):
+        stripped = item.strip()
+        if not stripped.startswith("{"):
+            return stripped
+        try:
+            item = json.loads(stripped)
+        except json.JSONDecodeError:
+            return stripped
+
+    if isinstance(item, dict):
+        text = item.get("description") or item.get("name") or ", ".join(str(v) for v in item.values())
+        source = item.get("source")
+        return f"{text} ({source})" if source else str(text)
+
+    return str(item)
 
 
 @tool

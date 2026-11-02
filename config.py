@@ -31,8 +31,8 @@ class Settings(BaseSettings):
 
     # --- BfArM RSS ---
     BFARM_RSS_URL: str = (
-        "https://www.bfarm.de/SiteGlobals/Functions/RSS/DE/Feed/"
-        "RSSNewsfeed_Kundeninfo_Risikoinfo.xml"
+        "https://www.bfarm.de/SiteGlobals/Functions/RSSFeed/DE/"
+        "Pharmakovigilanz/Risikoinformation/RSSNewsfeed.xml"
     )
 
     # --- FastAPI Server ---
