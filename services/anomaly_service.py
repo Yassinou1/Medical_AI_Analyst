@@ -23,16 +23,16 @@ class AnomalyDetectionService:
 
     async def detect_anomalies(self, drug_name: str) -> dict:
         """Calculate if the most recent week is a statistical anomaly asynchronously.
-        
+
         Args:
             drug_name: The active ingredient to analyze.
-            
+
         Returns:
             Dictionary containing the anomaly status, z-score, and historical baseline.
         """
         logger.info(f"Running anomaly detection for {drug_name}")
         df = await self.data_service.fetch_adverse_events_timeseries(drug_name)
-        
+
         if df.empty or len(df) < self.window_size + 1:
             logger.warning(f"Insufficient data for {drug_name}. Need {self.window_size + 1} weeks, got {len(df)}.")
             return {
@@ -45,17 +45,17 @@ class AnomalyDetectionService:
 
         counts = df['Adverse_Events'].values
         current_week_count = counts[-1]
-        
+
         # Historical baseline excludes the current week
         historical_baseline = counts[-(self.window_size + 1):-1]
-        
+
         mean = np.mean(historical_baseline)
         std = np.std(historical_baseline)
         std = std if std > 0 else 1.0  # Prevent division by zero
-        
+
         z_score = (current_week_count - mean) / std
         is_anomaly = bool(z_score > self.z_threshold)
-        
+
         return {
             "is_anomaly": is_anomaly,
             "current_count": int(current_week_count),

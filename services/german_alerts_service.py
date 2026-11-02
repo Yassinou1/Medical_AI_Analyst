@@ -39,7 +39,7 @@ class GermanPharmacovigilanceService:
                 try:
                     response = await client.get(feed_url)
                     response.raise_for_status()
-                    
+
                     # Parse the raw XML string
                     feed = feedparser.parse(response.text)
 
@@ -69,11 +69,11 @@ class GermanPharmacovigilanceService:
                                 }
                             )
                 except Exception as e:
-                    logger.exception(f"Fehler beim Abruf des BfArM-Feeds: {feed_url} - {e}")
+                    logger.exception(f"Failed to fetch BfArM feed: {feed_url} - {e}")
                     raise
 
         logger.info(
-            "BfArM-Suche für '%s': %d Treffer gefunden", drug_name, len(alerts)
+            "BfArM search for '%s': %d matches found", drug_name, len(alerts)
         )
         return alerts
 
@@ -81,8 +81,11 @@ class GermanPharmacovigilanceService:
 if __name__ == "__main__":
     import asyncio
     logging.basicConfig(level=logging.INFO)
+
     async def main():
         service = GermanPharmacovigilanceService()
-        ergebnisse = await service.fetch_german_alerts("ibuprofen")
-        print(ergebnisse)
+        results = await service.fetch_german_alerts("ibuprofen")
+        print(results)
+
     asyncio.run(main())
+

@@ -6,27 +6,28 @@ A hybrid machine learning and generative AI project for **predicting and analyzi
 
 - `main.py` – Core FastAPI backend handling API requests, validation, and routing.
 - `app.py` – Streamlit web dashboard for interactive visualization and benchmarking of adverse events.
-- `train_lstm.py` – Script for training the multivariate LSTM neural network on medical data, with chronological train/test splitting and Early Stopping.
-- `eval_model.py` – Script for quantitative evaluation and backtesting of the model's accuracy on the holdout test set.
-- `config.py` - Centralized application configuration.
+- `config.py` – Centralized application configuration.
 - `services/` – Directory containing the core business logic:
-  - `lstm_service.py` – Handles quantitative predictions based on historical trends.
+  - `anomaly_service.py` – Detects statistical anomalies (Z-scores) in weekly adverse event reports.
   - `agent_service.py` – Executes autonomous literature research using LangGraph and a local LLM.
   - `openfda_service.py` – Manages the data pipeline connecting to the public OpenFDA API.
-  - `german_alerts_service.py` - Fetches regulatory drug safety alerts (Rote-Hand-Briefe) from the BfArM RSS feed.
-  - `preprocessing.py` - Shared feature engineering pipeline.
+  - `german_alerts_service.py` – Fetches regulatory drug safety alerts (Rote-Hand-Briefe) from the BfArM RSS feed.
+  - `preprocessing.py` – Shared feature engineering pipeline.
+- `tests/` – Unit tests for the API and the anomaly detection service.
+- `Dockerfile.backend`, `Dockerfile.frontend`, `docker-compose.yml` – Containerized setup for backend and dashboard.
+- `requirements.txt` – List of pinned Python dependencies.
 
 ## Description
 
-This project explores predictive modeling combined with an agentic AI workflow for the healthcare sector.  
-The goal is to provide a quantitative prediction of upcoming adverse drug events using a multivariate LSTM model, and enrich it with an evidence-based clinical summary using an autonomous AI agent (LangGraph) equipped with medical literature access.  
-It serves as an end-to-end portfolio project applying modern MLOps, deep learning, and GenAI techniques to Pharmacovigilance.
+This project explores statistical signal detection combined with an agentic AI workflow for the healthcare sector.  
+The goal is to detect unusual spikes in reported adverse drug events using statistical anomaly detection (Z-scores against a historical baseline), and enrich them with an evidence-based clinical summary using an autonomous AI agent (LangGraph) equipped with medical literature access.  
+It serves as an end-to-end portfolio project applying modern MLOps and GenAI techniques to Pharmacovigilance.
 
 ## Data Sources
 
 The data used in this project is sourced live from three primary APIs:
 
-1. **OpenFDA API:** Provides historical, real-time data on reported adverse drug events (used for training the LSTM and feature engineering).  
+1. **OpenFDA API:** Provides historical, real-time data on reported adverse drug events (used for the anomaly detection baseline and trend comparison).  
    -> [OpenFDA Documentation](https://open.fda.gov/apis/drug/event/)
 2. **PubMed API:** Serves as the tool for the LangGraph agent to autonomously search for the latest medical studies, case reports, and contraindications.
 3. **BfArM RSS:** Provides official regulatory safety communications (Rote-Hand-Briefe) from German authorities.
@@ -55,11 +56,9 @@ ollama serve &
 ollama pull mistral
 ```
 
-**4. Train the Model (Optional)**
-The repository comes with pre-configured scripts to retrain the model:
+**4. Run the Tests (Optional)**
 ```bash
-python train_lstm.py --drug ibuprofen
-python eval_model.py --drug ibuprofen
+pytest
 ```
 
 ## Running the Application
@@ -84,3 +83,11 @@ streamlit run app.py
 ```
 
 Navigate to `http://localhost:8501` to access the dashboard.
+
+**Alternative: Docker Compose**
+
+With Ollama running on the host, start backend and dashboard in containers:
+```bash
+docker compose up --build
+```
+

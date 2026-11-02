@@ -1,9 +1,9 @@
 """Autonomous agent service for clinical literature research.
 
 Uses LangChain and LangGraph to perform targeted PubMed searches
-to explain potential anomalies in adverse drug events. Now upgraded
-to return structured JSON (Pydantic models) for API consumption,
-and completely asynchronous.
+to explain potential anomalies in adverse drug events. Returns
+structured JSON (Pydantic models) for API consumption and runs
+fully asynchronously.
 """
 
 import logging
@@ -49,20 +49,21 @@ class AgentService:
     def __init__(self) -> None:
         self.tools = [search_medical_literature]
         self.tool_node = ToolNode(self.tools)
-        
+
         # Standard ChatOllama for reasoning/tool loop
         self.llm = ChatOllama(
             model=settings.OLLAMA_MODEL,
             temperature=settings.OLLAMA_TEMPERATURE
         )
         self.llm_with_tools = self.llm.bind_tools(self.tools)
-        
+
         # Separate LLM call mapped to the Pydantic schema for final formatting
         self.llm_structured = self.llm.with_structured_output(ClinicalAnalysis)
-        
+
         self.workflow = self._build_graph()
 
     def _build_graph(self):
+        """Build and compile the LangGraph reasoning and tool-calling loop."""
         async def agent_node(state: AgentState):
             response = await self.llm_with_tools.ainvoke(state["messages"])
             return {"messages": [response]}
@@ -76,7 +77,7 @@ class AgentService:
         workflow = StateGraph(AgentState)
         workflow.add_node("agent", agent_node)
         workflow.add_node("tools", self.tool_node)
-        
+
         workflow.add_edge(START, "agent")
         workflow.add_conditional_edges(
             "agent",
@@ -84,17 +85,17 @@ class AgentService:
             {"continue": "tools", "end": END}
         )
         workflow.add_edge("tools", "agent")
-        
+
         return workflow.compile()
 
     async def analyze_with_agent(self, drug_name: str, current_count: int, z_score: float) -> dict:
-        """Executes the agent workflow and formats the output as structured JSON asynchronously.
-        
+        """Execute the agent workflow and format the output as structured JSON asynchronously.
+
         Args:
             drug_name: The active ingredient.
             current_count: Number of adverse events reported this week.
             z_score: The statistical severity of the anomaly.
-            
+
         Returns:
             Dictionary matching the ClinicalAnalysis schema.
         """
@@ -103,28 +104,28 @@ class AgentService:
         Wirkstoff: {drug_name}
         Unser Anomalie-Erkennungssystem meldet einen signifikanten Anstieg von Nebenwirkungsmeldungen.
         Aktuelle wöchentliche Fälle: {current_count} (Z-Score: {z_score}).
-        
+
         Deine Aufgabe: Erkläre diesen potenziellen Anstieg. Nutze dein PubMed-Tool, um nach speziellen, selteneren oder neuen Risikofaktoren zu suchen.
-        
+
         STRIKTE REGELN:
         1. FOKUS AUF ANOMALIEN: Nenne spezifische Medikamenten-Interaktionen oder Risiken für spezifische Patientengruppen.
         2. ZITATION: Autor und Jahr in Klammern in den Text integrieren.
         """
-        
+
         inputs = {"messages": [HumanMessage(content=system_prompt)]}
-        
+
         try:
             # 1. Run the reasoning and search loop
             result = await self.workflow.ainvoke(inputs)
             final_message = result["messages"][-1].content
-            
+
             # 2. Force the output into the structured JSON schema
             logger.info("Formatting agent thoughts into structured ClinicalAnalysis JSON.")
             formatting_prompt = f"Wandle die folgenden Forschungsergebnisse in das vorgegebene JSON-Schema um. WICHTIG: Übersetze alle Erkenntnisse ins Deutsche:\n\n{final_message}"
             structured_result = await self.llm_structured.ainvoke([HumanMessage(content=formatting_prompt)])
-            
+
             return structured_result.model_dump()
-            
+
         except Exception as e:
             logger.exception("Agent service execution failed")
             return {

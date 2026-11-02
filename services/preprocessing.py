@@ -1,8 +1,7 @@
 """Shared feature engineering pipeline for adverse event time series.
 
 This module is the single source of truth for transforming raw weekly
-adverse-event counts into the feature matrix consumed by the LSTM model.
-Any change here automatically applies to training, evaluation, and inference.
+adverse-event counts into a feature matrix (rolling averages and momentum).
 """
 
 import numpy as np
@@ -17,8 +16,8 @@ def prepare_features(df: pd.DataFrame) -> pd.DataFrame:
         - SMA_12: 12-week simple moving average (seasonal trend)
         - ROC:    week-over-week percentage change (momentum)
 
-    Rows containing NaN or ±inf (from rolling window warm-up or zero-division)
-    are dropped so the output is model-ready.
+    Rows containing NaN or +/-inf (from rolling window warm-up or zero-division)
+    are dropped so the output is ready for analysis.
 
     Args:
         df: DataFrame with at least an ``Adverse_Events`` column,

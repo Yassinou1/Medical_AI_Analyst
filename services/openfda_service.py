@@ -1,6 +1,4 @@
-"""
-OpenFDA API Service for fetching adverse events timeseries data.
-"""
+"""OpenFDA API service for fetching adverse event time series data."""
 
 import datetime
 import logging
@@ -22,7 +20,7 @@ class OpenFDAAPIError(Exception):
 
 class MedicalDataService:
     """Service to interact with the OpenFDA API to retrieve medical data."""
-    
+
     def __init__(self) -> None:
         """Initialize the MedicalDataService."""
         self.base_url = settings.OPENFDA_BASE_URL
@@ -35,46 +33,45 @@ class MedicalDataService:
         reraise=True
     )
     async def fetch_adverse_events_timeseries(self, drug_name: str) -> pd.DataFrame:
-        """
-        Fetch adverse events timeseries data for a given drug asynchronously.
-        
+        """Fetch weekly adverse event counts for a given drug asynchronously.
+
         Args:
-            drug_name (str): The name of the drug.
-            
+            drug_name: The name of the drug.
+
         Returns:
-            pd.DataFrame: A DataFrame containing the weekly adverse events.
-            
+            DataFrame containing the weekly adverse events.
+
         Raises:
             OpenFDAAPIError: If the API request fails after retries.
         """
-        logger.info(f"Lade Nebenwirkungs-Daten (ab {self.start_date}) für '{drug_name}'...")
-        
+        logger.info(f"Fetching adverse event data (since {self.start_date}) for '{drug_name}'")
+
         today_str = datetime.datetime.now().strftime("%Y%m%d")
-        
+
         params = {
             "search": f'(patient.drug.medicinalproduct:"{drug_name}") AND (receiptdate:[{self.start_date} TO {today_str}])',
             "count": "receiptdate"
         }
-        
+
         async with httpx.AsyncClient(timeout=settings.OPENFDA_REQUEST_TIMEOUT) as client:
             try:
                 response = await client.get(self.base_url, params=params)
                 response.raise_for_status()
-                
+
                 data = response.json()
-                
+
                 df = pd.DataFrame(data['results'])
                 if df.empty:
                     return pd.DataFrame(columns=['Adverse_Events'])
-                
+
                 df['time'] = pd.to_datetime(df['time'], format='%Y%m%d')
                 df.set_index('time', inplace=True)
                 df.rename(columns={'count': 'Adverse_Events'}, inplace=True)
-                
+
                 weekly_df = df.resample('W').sum()
-                
+
                 return weekly_df
-                
+
             except httpx.HTTPStatusError as e:
                 logger.error(f"HTTP error occurred: {e}")
                 raise OpenFDAAPIError(f"Fehler beim Abruf der FDA API: {e}") from e

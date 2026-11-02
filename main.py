@@ -65,14 +65,14 @@ async def cached_analyze(drug: str, app_state: dict):
     try:
         agent_summary, german_alerts = await asyncio.gather(
             app_state['agent_service'].analyze_with_agent(
-                drug_name=drug, 
+                drug_name=drug,
                 current_count=anomaly_result.get("current_count", 0),
                 z_score=anomaly_result.get("z_score", 0.0)
             ),
             app_state['alerts_service'].fetch_german_alerts(drug),
             return_exceptions=True
         )
-        
+
         if isinstance(agent_summary, Exception):
             logger.exception(f"Error in agent service for {drug}")
             raise HTTPException(status_code=500, detail=f"KI-Analyse fehlgeschlagen: {str(agent_summary)}")
@@ -99,10 +99,10 @@ _analysis_cache = {}
 async def analyze_drug(request: MedicalRequest, api_request: Request):
     """Analyze a drug for reporting anomalies and fetch clinical literature."""
     drug = request.drug_name.lower()
-    
+
     if drug in _analysis_cache:
         return _analysis_cache[drug]
-    
+
     try:
         anomaly_result = await api_request.app.state.anomaly_service.detect_anomalies(drug)
     except Exception as e:
@@ -110,10 +110,10 @@ async def analyze_drug(request: MedicalRequest, api_request: Request):
         raise HTTPException(status_code=500, detail=f"Datenanalyse fehlgeschlagen: {str(e)}")
 
     try:
-        # run these two independent tasks concurrently
+        # Run these two independent tasks concurrently
         agent_task = asyncio.create_task(
             api_request.app.state.agent_service.analyze_with_agent(
-                drug_name=drug, 
+                drug_name=drug,
                 current_count=anomaly_result.get("current_count", 0),
                 z_score=anomaly_result.get("z_score", 0.0)
             )
@@ -121,9 +121,9 @@ async def analyze_drug(request: MedicalRequest, api_request: Request):
         alerts_task = asyncio.create_task(
             api_request.app.state.alerts_service.fetch_german_alerts(drug)
         )
-        
+
         agent_summary, german_alerts = await asyncio.gather(agent_task, alerts_task, return_exceptions=True)
-        
+
         if isinstance(agent_summary, Exception):
             logger.exception(f"Error in agent service for {drug}")
             raise HTTPException(status_code=500, detail=f"KI-Analyse fehlgeschlagen: {str(agent_summary)}")
@@ -143,7 +143,7 @@ async def analyze_drug(request: MedicalRequest, api_request: Request):
         "qualitative_analysis": agent_summary,
         "german_regulatory_alerts": german_alerts
     }
-    
+
     _analysis_cache[drug] = response_data
     return response_data
 
@@ -153,20 +153,20 @@ _trend_cache = {}
 async def get_drug_trend(drug_name: str, api_request: Request):
     """Microservice endpoint to get 4-week trend for a drug."""
     drug = drug_name.lower()
-    
+
     if drug in _trend_cache:
         return _trend_cache[drug]
-        
+
     try:
         df = await api_request.app.state.data_service.fetch_adverse_events_timeseries(drug)
         if not df.empty and len(df) >= 4:
             total_cases = int(df['Adverse_Events'].tail(4).sum())
         else:
             total_cases = 0
-            
+
         result = {"drug_name": drug, "cases_4_weeks": total_cases}
         _trend_cache[drug] = result
         return result
     except Exception as e:
-        logger.exception(f"Fehler beim Abrufen der Trend-Daten für {drug}: {str(e)}")
+        logger.exception(f"Error fetching trend data for {drug}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Trendanalyse fehlgeschlagen: {str(e)}")
