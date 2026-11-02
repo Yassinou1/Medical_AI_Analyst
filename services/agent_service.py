@@ -1,5 +1,16 @@
-from typing import TypedDict, Annotated, Sequence
+"""Autonomous agent service for clinical literature research.
+
+Uses LangChain and LangGraph to perform targeted PubMed searches
+to explain potential anomalies in adverse drug events. Now upgraded
+to return structured JSON (Pydantic models) for API consumption,
+and completely asynchronous.
+"""
+
+import logging
+from typing import TypedDict, Annotated, Sequence, List
 import operator
+from pydantic import BaseModel, Field
+
 from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_ollama import ChatOllama
 from langchain_community.tools.pubmed.tool import PubmedQueryRun
@@ -7,28 +18,53 @@ from langchain_core.tools import tool
 from langgraph.graph import StateGraph, END, START
 from langgraph.prebuilt import ToolNode
 
+from config import settings
+
+logger = logging.getLogger(__name__)
+
+
 class AgentState(TypedDict):
+    """State object for the LangGraph workflow."""
     messages: Annotated[Sequence[BaseMessage], operator.add]
+
+
+class ClinicalAnalysis(BaseModel):
+    """Structured output expected from the LLM."""
+    risk_factors: List[str] = Field(description="Spezifische Risikofaktoren für Patienten oder Medikamentenwechselwirkungen aus der Literatur. WICHTIG: Antworte auf Deutsch.")
+    contraindications: List[str] = Field(description="Bekannte oder neu entdeckte Kontraindikationen. WICHTIG: Antworte auf Deutsch.")
+    summary: str = Field(description="Kurze Zusammenfassung (2-3 Sätze) der aktuellen Literatur, die die Anomalie erklärt. WICHTIG: Antworte auf Deutsch.")
+    confidence_score: float = Field(description="Konfidenz der Ergebnisse von 0.0 bis 1.0 basierend auf der Qualität der Evidenz.")
+
 
 @tool
 def search_medical_literature(query: str) -> str:
-    """Sucht in PubMed nach medizinischen Studien, Fallberichten und Kontraindikationen."""
+    """Search PubMed for medical studies, case reports, and contraindications."""
     search = PubmedQueryRun()
     return search.invoke(query)
 
-tools = [search_medical_literature]
-tool_node = ToolNode(tools)
-
-llm = ChatOllama(model="mistral", temperature=0)
-llm_with_tools = llm.bind_tools(tools)
 
 class AgentService:
-    def __init__(self):
+    """Manages the autonomous agent workflow for medical literature analysis."""
+
+    def __init__(self) -> None:
+        self.tools = [search_medical_literature]
+        self.tool_node = ToolNode(self.tools)
+        
+        # Standard ChatOllama for reasoning/tool loop
+        self.llm = ChatOllama(
+            model=settings.OLLAMA_MODEL,
+            temperature=settings.OLLAMA_TEMPERATURE
+        )
+        self.llm_with_tools = self.llm.bind_tools(self.tools)
+        
+        # Separate LLM call mapped to the Pydantic schema for final formatting
+        self.llm_structured = self.llm.with_structured_output(ClinicalAnalysis)
+        
         self.workflow = self._build_graph()
 
     def _build_graph(self):
-        def agent_node(state: AgentState):
-            response = llm_with_tools.invoke(state["messages"])
+        async def agent_node(state: AgentState):
+            response = await self.llm_with_tools.ainvoke(state["messages"])
             return {"messages": [response]}
 
         def should_continue(state: AgentState):
@@ -39,29 +75,63 @@ class AgentService:
 
         workflow = StateGraph(AgentState)
         workflow.add_node("agent", agent_node)
-        workflow.add_node("tools", tool_node)
+        workflow.add_node("tools", self.tool_node)
         
         workflow.add_edge(START, "agent")
-        workflow.add_conditional_edges("agent", should_continue, {"continue": "tools", "end": END})
+        workflow.add_conditional_edges(
+            "agent",
+            should_continue,
+            {"continue": "tools", "end": END}
+        )
         workflow.add_edge("tools", "agent")
         
         return workflow.compile()
 
-    def analyze_with_agent(self, drug_name: str, predicted_events: int) -> str:
+    async def analyze_with_agent(self, drug_name: str, current_count: int, z_score: float) -> dict:
+        """Executes the agent workflow and formats the output as structured JSON asynchronously.
+        
+        Args:
+            drug_name: The active ingredient.
+            current_count: Number of adverse events reported this week.
+            z_score: The statistical severity of the anomaly.
+            
+        Returns:
+            Dictionary matching the ClinicalAnalysis schema.
+        """
         system_prompt = f"""
         Du bist ein klinischer KI-Analyst für Pharmakovigilanz und Toxikologie.
         Wirkstoff: {drug_name}
-        Unser LSTM-Algorithmus schlägt Alarm: Er prognostiziert für nächste Woche {predicted_events} gemeldete Nebenwirkungen.
+        Unser Anomalie-Erkennungssystem meldet einen signifikanten Anstieg von Nebenwirkungsmeldungen.
+        Aktuelle wöchentliche Fälle: {current_count} (Z-Score: {z_score}).
         
         Deine Aufgabe: Erkläre diesen potenziellen Anstieg. Nutze dein PubMed-Tool, um nach speziellen, selteneren oder neuen Risikofaktoren zu suchen.
         
-        STRIKTE OUTPUT-REGELN:
-        1. KEIN BASISWISSEN: Erwähne NIEMALS bekannte Standard-Nebenwirkungen (wie Magen-Darm-Blutungen, Übelkeit oder leichte Allergien). Wir wissen das bereits.
-        2. FOKUS AUF ANOMALIEN: Nenne stattdessen spezifische Medikamenten-Interaktionen (Wechselwirkungen mit anderen Wirkstoffen), Risiken für sehr spezifische Patientengruppen (z.B. Niereninsuffizienz) oder saisonale/neue toxikologische Erkenntnisse.
-        3. FORMAT: Antworte AUSSCHLIESSLICH in 2 bis 3 kurzen Bulletpoints auf Deutsch.
-        4. ZITATION: Autor und Jahr in Klammern in den Satz integrieren (z.B. "(Müller et al., 2023)").
+        STRIKTE REGELN:
+        1. FOKUS AUF ANOMALIEN: Nenne spezifische Medikamenten-Interaktionen oder Risiken für spezifische Patientengruppen.
+        2. ZITATION: Autor und Jahr in Klammern in den Text integrieren.
         """
         
         inputs = {"messages": [HumanMessage(content=system_prompt)]}
-        result = self.workflow.invoke(inputs)
-        return result["messages"][-1].content
+        
+        try:
+            # 1. Run the reasoning and search loop
+            result = await self.workflow.ainvoke(inputs)
+            final_message = result["messages"][-1].content
+            
+            # 2. Force the output into the structured JSON schema
+            logger.info("Formatting agent thoughts into structured ClinicalAnalysis JSON.")
+            formatting_prompt = f"Wandle die folgenden Forschungsergebnisse in das vorgegebene JSON-Schema um. WICHTIG: Übersetze alle Erkenntnisse ins Deutsche:\n\n{final_message}"
+            structured_result = await self.llm_structured.ainvoke([HumanMessage(content=formatting_prompt)])
+            
+            return structured_result.model_dump()
+            
+        except Exception as e:
+            logger.exception("Agent service execution failed")
+            return {
+                "risk_factors": ["Fehler bei der Literaturrecherche"],
+                "contraindications": ["Keine Daten abrufbar"],
+                "summary": f"Der KI-Agent konnte nicht ausgeführt werden. Stellen Sie sicher, dass Ollama läuft. Details: {str(e)}",
+                "confidence_score": 0.0
+            }
+
+__all__ = ["AgentService", "ClinicalAnalysis"]
